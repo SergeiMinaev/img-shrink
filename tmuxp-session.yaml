@@ -1,0 +1,21 @@
+# Если вы не используете Tmuxp, игнорируйте этот файл.
+#
+# Конфиг для запуска проекта через сессию Tmuxp ( https://github.com/tmux-python/tmuxp ).
+# Для загрузки сессии Vim, должен быть установлен плагин https://github.com/mhinz/vim-startify ,
+# а сессия должна быть сохранена с названием img-shrink.
+# Путь до каталога проекта должен быть записан в $IMG_SHRINK_HOME.
+
+
+session_name: img-shrink
+start_directory: $IMG_SHRINK_HOME
+windows:
+- window_name: manage
+  panes:
+    - shell_command:
+
+- window_name: code
+  focus: true
+  panes:
+    - shell_command:
+      - vim
+      - :SLoad img-shrink
