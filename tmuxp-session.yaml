@@ -13,6 +13,11 @@ windows:
   panes:
     - shell_command:
 
+- window_name: ai
+  panes:
+    - shell_command:
+      - ./aider.sh
+
 - window_name: code
   focus: true
   panes:
