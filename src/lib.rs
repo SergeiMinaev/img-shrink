@@ -32,22 +32,22 @@ pub fn make_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
 	}
 }
 
-pub fn make_version(
+pub fn make_version_from_png(
 		png_path: &PathBuf, output_format: &str, size: &str, crop: bool
 ) -> NamedTempFile {
 	let png_path = png::resize(png_path, size, crop);
 	let quality = 1;
-	_make_version(&png_path, output_format, quality)
+	_make_version_from_png(&png_path, output_format, quality)
 }
 
-pub fn make_version_auto(
+pub fn make_version_auto_from_png(
 		png_path: &PathBuf, output_format: &str, size: &str, crop: bool
 ) -> NamedTempFile {
 	let base_png = png::resize(png_path, size, crop);
 	let mut last_candidate: Option<NamedTempFile> = None;
 
 	for quality_idx in 0..7 {
-		let cand = _make_version(&base_png, output_format, quality_idx);
+		let cand = _make_version_from_png(&base_png, output_format, quality_idx);
 
 		// decode candidate back to PNG for DSSIM comparison
 		let cand_png = match output_format.to_lowercase().as_str() {
@@ -68,7 +68,7 @@ pub fn make_version_auto(
 	last_candidate.unwrap()
 }
 
-fn _make_version(png_path: &PathBuf, output_format: &str, quality: usize) -> NamedTempFile {
+fn _make_version_from_png(png_path: &PathBuf, output_format: &str, quality: usize) -> NamedTempFile {
 	match output_format.to_lowercase().as_str() {
 		"jxl" =>  {
 			jxl::encode(png_path, quality)
