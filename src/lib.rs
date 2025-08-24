@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use tempfile::NamedTempFile;
 
 pub mod util;
 pub mod jxl;
@@ -31,40 +32,43 @@ pub fn make_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
 	}
 }
 
-pub fn make_version(png_path: &PathBuf, output_format: &str, size: &str, crop: bool) -> PathBuf {
+pub fn make_version(
+		png_path: &PathBuf, output_format: &str, size: &str, crop: bool
+) -> NamedTempFile {
 	let png_path = png::resize(png_path, size, crop);
 	let quality = 1;
-	let result = _make_version(&png_path, output_format, quality);
-	result
+	_make_version(&png_path, output_format, quality)
 }
 
-pub fn make_version_auto(png_path: &PathBuf, output_format: &str, size: &str, crop: bool) -> PathBuf {
+pub fn make_version_auto(
+		png_path: &PathBuf, output_format: &str, size: &str, crop: bool
+) -> NamedTempFile {
 	let base_png = png::resize(png_path, size, crop);
-	let mut last_candidate: Option<PathBuf> = None;
+	let mut last_candidate: Option<NamedTempFile> = None;
 
 	for quality_idx in 0..7 {
 		let cand = _make_version(&base_png, output_format, quality_idx);
 
 		// decode candidate back to PNG for DSSIM comparison
 		let cand_png = match output_format.to_lowercase().as_str() {
-			"jxl" => jxl::file_to_png(&cand),
-			"jpg" | "jpeg" => jpg::file_to_png(&cand),
-			"webp" => webp::file_to_png(&cand),
+			"jxl" => jxl::file_to_png(&cand.path().to_path_buf()),
+			"jpg" | "jpeg" => jpg::file_to_png(&cand.path().to_path_buf()),
+			"webp" => webp::file_to_png(&cand.path().to_path_buf()),
 			_ => unreachable!(),
 		};
 
 		let dist = diff::distance(&base_png, &cand_png);
 
-		last_candidate = Some(cand.clone());
-
 		if dist <= DSSIM_THRESHOLD {
 			return cand;
 		}
+
+		last_candidate = Some(cand);
 	}
 	last_candidate.unwrap()
 }
 
-fn _make_version(png_path: &PathBuf, output_format: &str, quality: usize) -> PathBuf {
+fn _make_version(png_path: &PathBuf, output_format: &str, quality: usize) -> NamedTempFile {
 	match output_format.to_lowercase().as_str() {
 		"jxl" =>  {
 			jxl::encode(png_path, quality)

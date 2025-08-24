@@ -1,12 +1,14 @@
 use std::process::Command;
 use std::path::PathBuf;
 use crate::util;
+use tempfile::NamedTempFile;
 
 
-pub fn encode(png_path: &PathBuf, quality_idx: usize) -> PathBuf {
+pub fn encode(png_path: &PathBuf, quality_idx: usize) -> NamedTempFile {
     let quality_list = vec!["65", "70", "75", "80", "85", "90", "95"];
     let quality = quality_list[quality_idx];
-    let out_path = util::mktemp("jpg");
+    let tmp = util::named_tempfile("jpg");
+    let out_path = tmp.path().to_path_buf();
     let output = Command::new("/usr/bin/cjpg")
                      .arg("-q")
                      .arg(quality)
@@ -17,7 +19,7 @@ pub fn encode(png_path: &PathBuf, quality_idx: usize) -> PathBuf {
     if output.status.success() == false {
         panic!("jpg::encode() failed: {output:?}");
     }
-    return out_path
+    tmp
 }
 
 pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
