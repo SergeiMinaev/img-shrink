@@ -2,3 +2,5 @@
 Cargo.lock
 
 *.swp
+.aider*
+aider.sh
