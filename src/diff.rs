@@ -3,8 +3,7 @@ use std::process::Command;
 
 /// Return DSSIM distance between two images (0.0 ⇒ identical).
 pub fn distance(a: &Path, b: &Path) -> f32 {
-    let out = Command::new("/usr/bin/dssim")
-        .arg("--single")   // print only the score
+    let out = Command::new("dssim")
         .arg(a)
         .arg(b)
         .output()
@@ -14,9 +13,11 @@ pub fn distance(a: &Path, b: &Path) -> f32 {
         panic!("dssim failed: {out:?}");
     }
 
-    String::from_utf8(out.stdout)
-        .unwrap()
-        .trim()
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    stdout
+        .split_whitespace()
+        .next()
+        .expect("unexpected dssim output")
         .parse::<f32>()
-        .unwrap()
+        .expect("failed to parse dssim score")
 }

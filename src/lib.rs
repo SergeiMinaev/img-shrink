@@ -8,7 +8,166 @@ pub mod webp;
 pub mod png;
 pub mod diff;
 
-const DSSIM_THRESHOLD: f32 = 0.004;
+//// dSSIM presets expressed in terms of *output quality*
+//// higher quality ⇒ smaller distance (stricter), lower quality ⇒ larger distance
+pub const LOW_QUALITY_THRESHOLD:    f32 = 0.008; // strongest compression
+pub const MEDIUM_QUALITY_THRESHOLD: f32 = 0.004; // balanced default (was 0.04)
+pub const HIGH_QUALITY_THRESHOLD:   f32 = 0.002; // near-lossless
+// Keep the old name so existing code keeps compiling.
+pub const DEFAULT_DSSIM_THRESHOLD: f32 = MEDIUM_QUALITY_THRESHOLD;
+pub const MAX_QUALITY_IDX: usize = 6;
+
+
+#[derive(Clone, Copy)]
+pub struct EncodeOptions<'a> {
+    pub size:     &'a str,
+    pub crop:     bool,
+    pub threshold: Option<f32>,
+}
+
+impl<'a> Default for EncodeOptions<'a> {
+    fn default() -> Self {
+        Self {
+            size: ">",
+            crop: false,
+            threshold: Some(DEFAULT_DSSIM_THRESHOLD),
+        }
+    }
+}
+
+pub struct EncodeOptionsBuilder<'a> {
+    opts: EncodeOptions<'a>,
+}
+
+impl<'a> EncodeOptionsBuilder<'a> {
+    pub fn new() -> Self {
+        Self { opts: EncodeOptions::default() }
+    }
+
+    pub fn size(mut self, size: &'a str) -> Self {
+        self.opts.size = size;
+        self
+    }
+
+    pub fn crop(mut self, crop: bool) -> Self {
+        self.opts.crop = crop;
+        self
+    }
+
+    // ---------- quality preset helpers ----------
+    pub fn low(mut self) -> Self {
+        self.opts.threshold = Some(LOW_QUALITY_THRESHOLD);
+        self
+    }
+
+    pub fn medium(mut self) -> Self {
+        self.opts.threshold = Some(MEDIUM_QUALITY_THRESHOLD);
+        self
+    }
+
+    pub fn high(mut self) -> Self {
+        self.opts.threshold = Some(HIGH_QUALITY_THRESHOLD);
+        self
+    }
+
+    pub fn max(mut self) -> Self {
+        self.opts.threshold = None;
+        self
+    }
+
+    pub fn threshold(mut self, threshold: f32) -> Self {
+        self.opts.threshold = Some(threshold);
+        self
+    }
+
+    pub fn build(self) -> EncodeOptions<'a> {
+        self.opts
+    }
+}
+
+/// Main entry-point.
+/// 
+/// Pass an `EncodeOptions` value to control resize, cropping, adaptive quality
+/// selection and the optional dSSIM threshold.  For a quick one-liner that keeps
+/// the defaults, use `encode_default`.
+pub fn encode<'a>(
+    data: &Vec<u8>,
+    input_format: &str,
+    output_format: &str,
+    opts: EncodeOptions<'a>,
+) -> NamedTempFile {
+    let png = to_png(data, input_format);
+
+    // `None`  ⇒ fixed quality (single encode)
+    // `Some` ⇒ adaptive sweep until dSSIM ≤ threshold
+    let res = encode_from_png_internal(
+        &png,
+        output_format,
+        opts.size,
+        opts.crop,
+        opts.threshold,
+    );
+    let _ = std::fs::remove_file(png);
+    res
+}
+
+// Adaptive-quality convenience wrapper.
+// 
+// Builds default `EncodeOptions`, switches on adaptive mode and keeps the
+// library-wide `DEFAULT_DSSIM_THRESHOLD`.  No resize and no crop are applied.
+// 
+// Typical usage:
+// ```rust
+// let file = img_shrink::encode_adaptive(&bytes, "jpg", "jxl");
+// ```
+pub fn encode_adaptive(
+    data: &Vec<u8>,
+    input_format: &str,
+    output_format: &str,
+) -> NamedTempFile {
+    encode(data, input_format, output_format, EncodeOptions::default())
+}
+
+/// Internal helper: adaptive encoding with caller-supplied threshold.
+fn encode_from_png_internal(
+    png_path: &PathBuf,
+    output_format: &str,
+    size: &str,
+    crop: bool,
+    threshold: Option<f32>,
+) -> NamedTempFile {
+    let base_png = png::resize(png_path, size, crop);
+
+    // Fixed-quality
+    if threshold.is_none() {
+        return _encode_from_png(&base_png, output_format, MAX_QUALITY_IDX);
+    }
+
+    // Adaptive sweep
+    let mut last_candidate: Option<NamedTempFile> = None;
+    let thr = threshold.unwrap();
+
+    for quality_idx in 0..MAX_QUALITY_IDX {
+        let cand = _encode_from_png(&base_png, output_format, quality_idx);
+
+        // decode candidate back to PNG for dSSIM
+        let cand_png = match output_format.to_lowercase().as_str() {
+            "jxl"           => jxl::file_to_png(&cand.path().to_path_buf()),
+            "jpg" | "jpeg"  => jpg::file_to_png(&cand.path().to_path_buf()),
+            "webp"          => webp::file_to_png(&cand.path().to_path_buf()),
+            _               => unreachable!(),
+        };
+
+        let dist = diff::distance(&base_png, &cand_png);
+        println!("dist: {dist}");
+
+        if dist <= thr {
+            return cand;
+        }
+        last_candidate = Some(cand);
+    }
+    last_candidate.unwrap()
+}
 
 
 pub fn to_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
@@ -32,92 +191,6 @@ pub fn to_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
 	}
 }
 
-pub fn encode_from_png(
-		png_path: &PathBuf, output_format: &str, size: &str, crop: bool
-) -> NamedTempFile {
-	let png_path = png::resize(png_path, size, crop);
-	let quality = 1;
-	_encode_from_png(&png_path, output_format, quality)
-}
-
-pub fn encode_from_png_adaptive(
-		png_path: &PathBuf, output_format: &str, size: &str, crop: bool
-) -> NamedTempFile {
-	let base_png = png::resize(png_path, size, crop);
-	let mut last_candidate: Option<NamedTempFile> = None;
-
-	for quality_idx in 0..7 {
-		let cand = _encode_from_png(&base_png, output_format, quality_idx);
-
-		// decode candidate back to PNG for DSSIM comparison
-		let cand_png = match output_format.to_lowercase().as_str() {
-			"jxl" => jxl::file_to_png(&cand.path().to_path_buf()),
-			"jpg" | "jpeg" => jpg::file_to_png(&cand.path().to_path_buf()),
-			"webp" => webp::file_to_png(&cand.path().to_path_buf()),
-			_ => unreachable!(),
-		};
-
-		let dist = diff::distance(&base_png, &cand_png);
-
-		if dist <= DSSIM_THRESHOLD {
-			return cand;
-		}
-
-		last_candidate = Some(cand);
-	}
-	last_candidate.unwrap()
-}
-
-/// Create a resized & encoded version starting from raw bytes of any input
-/// format. Internally converts the source to a temporary PNG and delegates
-/// to `make_version_from_png`.
-pub fn encode(
-	data: &Vec<u8>,
-	input_format: &str,
-	output_format: &str,
-	size: &str,
-	crop: bool,
-) -> NamedTempFile {
-	let png = to_png(data, input_format);
-	let result = encode_from_png(&png, output_format, size, crop);
-	// best-effort cleanup of the intermediate PNG; ignore errors
-	let _ = std::fs::remove_file(png);
-	result
-}
-
-/// Same as `make_version` but automatically selects the lowest quality that
-/// meets the DSSIM threshold, using `make_version_auto_from_png`.
-pub fn encode_adaptive(
-	data: &Vec<u8>,
-	input_format: &str,
-	output_format: &str,
-	size: &str,
-	crop: bool,
-) -> NamedTempFile {
-	let png = to_png(data, input_format);
-	let result = encode_from_png_adaptive(&png, output_format, size, crop);
-	let _ = std::fs::remove_file(png);
-	result
-}
-
-//// Convenience wrapper: keep original size (no resize) and no crop.
-/// Internally calls `encode` with default `size = ">"` and `crop = false`.
-pub fn encode_simple(
-	data: &Vec<u8>,
-	input_format: &str,
-	output_format: &str,
-) -> NamedTempFile {
-	encode(data, input_format, output_format, ">", false)
-}
-
-//// Same as `encode_simple` but uses adaptive quality selection.
-pub fn encode_adaptive_simple(
-	data: &Vec<u8>,
-	input_format: &str,
-	output_format: &str,
-) -> NamedTempFile {
-	encode_adaptive(data, input_format, output_format, ">", false)
-}
 
 fn _encode_from_png(png_path: &PathBuf, output_format: &str, quality: usize) -> NamedTempFile {
 	match output_format.to_lowercase().as_str() {
