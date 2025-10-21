@@ -5,6 +5,7 @@ pub mod util;
 pub mod jxl;
 pub mod jpg;
 pub mod webp;
+pub mod heic;
 pub mod png;
 pub mod diff;
 
@@ -187,6 +188,9 @@ pub fn to_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
 		"webp" =>  {
 			webp::bytes_to_png(data)
 		},
+		"heic" | "heif" => {
+			heic::bytes_to_png(data)
+		},
 		_ => panic!("Unsupported format: {input_format}"),
 	}
 }
@@ -205,6 +209,9 @@ fn _encode_from_png(png_path: &PathBuf, output_format: &str, quality: usize) -> 
 		},
 		"webp" =>  {
 			webp::encode(png_path, quality)
+		},
+		"heic" | "heif" => {
+			heic::encode(png_path, quality)
 		},
 		_ => panic!("Unsupported format: {output_format}"),
 	}
