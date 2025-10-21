@@ -31,6 +31,7 @@ pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
     let out_path = util::mktemp("png");
     let output = Command::new("/usr/bin/convert")
                      .arg(input_path.as_path())
+                     .arg("-auto-orient")
                      .arg(out_path.as_path())
                      .output()
                      .expect("failed to execute process");
