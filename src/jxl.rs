@@ -3,21 +3,38 @@ use std::path::PathBuf;
 use crate::util;
 use tempfile::NamedTempFile;
 
+pub const QUALITY_LIST: [u8; 7] = [65, 70, 75, 80, 85, 90, 95];
+
 
 pub fn encode(png_path: &PathBuf, quality_idx: usize) -> NamedTempFile {
-    let quality_list = vec!["65", "70", "75", "80", "85", "90", "95"];
-    let quality = quality_list[quality_idx];
+    let quality = QUALITY_LIST[quality_idx];
     let tmp = util::named_tempfile("jxl");
     let out_path = tmp.path().to_path_buf();
     let output = Command::new("/usr/bin/cjxl")
                      .arg("-q")
-                     .arg(quality)
+                     .arg(quality.to_string())
                      .arg(png_path.as_path())
                      .arg(out_path.as_path())
                      .output()
                      .expect("failed to execute process");
     if output.status.success() == false {
         panic!("jxl::encode() failed: {output:?}");
+    }
+    tmp
+}
+
+pub fn encode_quality(png_path: &PathBuf, quality: u8) -> NamedTempFile {
+    let tmp = util::named_tempfile("jxl");
+    let out_path = tmp.path().to_path_buf();
+    let output = Command::new("/usr/bin/cjxl")
+                     .arg("-q")
+                     .arg(quality.to_string())
+                     .arg(png_path.as_path())
+                     .arg(out_path.as_path())
+                     .output()
+                     .expect("failed to execute process");
+    if output.status.success() == false {
+        panic!("jxl::encode_quality() failed: {output:?}");
     }
     tmp
 }

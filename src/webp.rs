@@ -4,14 +4,16 @@ use crate::util;
 use tempfile::NamedTempFile;
 
 
+pub const QUALITY_LIST: [u8; 7] = [75, 80, 85, 90, 95, 99, 100];
+
+
 pub fn encode(png_path: &PathBuf, quality_idx: usize) -> NamedTempFile {
-      let quality_list = vec!["65", "70", "75", "80", "85", "90", "95"];
-      let quality = quality_list[quality_idx];
+      let quality = QUALITY_LIST[quality_idx];
       let tmp = util::named_tempfile("webp");
       let out_path = tmp.path().to_path_buf();
       let output = Command::new("/usr/bin/cwebp")
                        .arg("-q")
-                       .arg(quality)
+                       .arg(quality.to_string())
                        .arg(png_path.as_path())
                        .arg("-o")
                        .arg(out_path.as_path())
@@ -19,6 +21,23 @@ pub fn encode(png_path: &PathBuf, quality_idx: usize) -> NamedTempFile {
                        .expect("failed to execute process");
       if output.status.success() == false {
           panic!("webp::encode() failed: {output:?}");
+      }
+      tmp
+}
+
+pub fn encode_quality(png_path: &PathBuf, quality: u8) -> NamedTempFile {
+      let tmp = util::named_tempfile("webp");
+      let out_path = tmp.path().to_path_buf();
+      let output = Command::new("/usr/bin/cwebp")
+                       .arg("-q")
+                       .arg(quality.to_string())
+                       .arg(png_path.as_path())
+                       .arg("-o")
+                       .arg(out_path.as_path())
+                       .output()
+                       .expect("failed to execute process");
+      if output.status.success() == false {
+          panic!("webp::encode_quality() failed: {output:?}");
       }
       tmp
 }

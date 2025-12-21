@@ -24,6 +24,8 @@ pub struct EncodeOptions<'a> {
     pub size:     &'a str,
     pub crop:     bool,
     pub threshold: Option<f32>,
+    pub quality_idx: Option<usize>,
+    pub quality_value: Option<u8>,
 }
 
 impl<'a> Default for EncodeOptions<'a> {
@@ -32,6 +34,8 @@ impl<'a> Default for EncodeOptions<'a> {
             size: ">",
             crop: false,
             threshold: Some(DEFAULT_DSSIM_THRESHOLD),
+            quality_idx: None,
+            quality_value: None,
         }
     }
 }
@@ -76,6 +80,21 @@ impl<'a> EncodeOptionsBuilder<'a> {
         self
     }
 
+    // Fixed-quality mode: disables adaptive thresholding.
+    pub fn quality_idx(mut self, quality_idx: usize) -> Self {
+        self.opts.threshold = None;
+        self.opts.quality_idx = Some(quality_idx);
+        self.opts.quality_value = None;
+        self
+    }
+
+    pub fn quality_value(mut self, quality: u8) -> Self {
+        self.opts.threshold = None;
+        self.opts.quality_idx = None;
+        self.opts.quality_value = Some(quality);
+        self
+    }
+
     pub fn threshold(mut self, threshold: f32) -> Self {
         self.opts.threshold = Some(threshold);
         self
@@ -107,6 +126,8 @@ pub fn encode<'a>(
         opts.size,
         opts.crop,
         opts.threshold,
+        opts.quality_idx,
+        opts.quality_value,
     );
     let _ = std::fs::remove_file(png);
     res
@@ -136,12 +157,23 @@ fn encode_from_png_internal(
     size: &str,
     crop: bool,
     threshold: Option<f32>,
+    quality_idx: Option<usize>,
+    quality_value: Option<u8>,
 ) -> NamedTempFile {
     let base_png = png::resize(png_path, size, crop);
 
     // Fixed-quality
     if threshold.is_none() {
-        return _encode_from_png(&base_png, output_format, MAX_QUALITY_IDX);
+        if let Some(quality) = quality_value {
+            return _encode_from_png_quality(&base_png, output_format, quality);
+        }
+        if let Some(idx) = quality_idx {
+            if idx > MAX_QUALITY_IDX {
+                panic!("quality_idx out of range: {idx} > {MAX_QUALITY_IDX}");
+            }
+        }
+        let idx = quality_idx.unwrap_or(MAX_QUALITY_IDX);
+        return _encode_from_png(&base_png, output_format, idx);
     }
 
     // Adaptive sweep
@@ -212,6 +244,31 @@ fn _encode_from_png(png_path: &PathBuf, output_format: &str, quality: usize) -> 
 		},
 		"heic" | "heif" => {
 			heic::encode(png_path, quality)
+		},
+		_ => panic!("Unsupported format: {output_format}"),
+	}
+}
+
+fn _encode_from_png_quality(
+    png_path: &PathBuf,
+    output_format: &str,
+    quality: u8,
+) -> NamedTempFile {
+	match output_format.to_lowercase().as_str() {
+		"jxl" =>  {
+			jxl::encode_quality(png_path, quality)
+		},
+		"jpg" =>  {
+			jpg::encode_quality(png_path, quality)
+		},
+		"jpeg" =>  {
+			jpg::encode_quality(png_path, quality)
+		},
+		"webp" =>  {
+			webp::encode_quality(png_path, quality)
+		},
+		"heic" | "heif" => {
+			heic::encode_quality(png_path, quality)
 		},
 		_ => panic!("Unsupported format: {output_format}"),
 	}
