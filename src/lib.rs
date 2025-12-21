@@ -148,7 +148,7 @@ fn encode_from_png_internal(
     let mut last_candidate: Option<NamedTempFile> = None;
     let thr = threshold.unwrap();
 
-    for quality_idx in 0..MAX_QUALITY_IDX {
+    for quality_idx in 0..=MAX_QUALITY_IDX {
         let cand = _encode_from_png(&base_png, output_format, quality_idx);
 
         // decode candidate back to PNG for dSSIM
