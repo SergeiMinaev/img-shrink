@@ -36,8 +36,33 @@ pub fn named_tempfile(ext: &str) -> NamedTempFile {
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
     let out_path = mktemp("png");
     let t0 = std::time::Instant::now();
+    if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+        eprintln!(
+            "vips cmd: /usr/bin/vips autorot {} {}",
+            input_path.display(),
+            out_path.display()
+        );
+    }
+    if std::env::var("IMG_SHRINK_DEBUG").ok().as_deref() == Some("1") {
+        let exif_out = Command::new("/usr/bin/vipsheader")
+            .arg("-a")
+            .arg(input_path.as_path())
+            .output()
+            .expect("failed to execute vipsheader");
+        if exif_out.status.success() == false {
+            panic!("vipsheader failed: {exif_out:?}");
+        }
+        eprintln!(
+            "vipsheader -a {}:\n{}",
+            input_path.display(),
+            String::from_utf8_lossy(&exif_out.stdout)
+        );
+        if exif_out.stderr.is_empty() == false {
+            eprintln!("vipsheader stderr: {}", String::from_utf8_lossy(&exif_out.stderr));
+        }
+    }
     let output = Command::new("/usr/bin/vips")
-        .arg("copy")
+        .arg("autorot")
         .arg(input_path.as_path())
         .arg(&out_path)
         .output()
