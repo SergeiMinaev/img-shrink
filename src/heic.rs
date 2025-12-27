@@ -45,21 +45,28 @@ pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
 }
 
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
-	let out_path = util::mktemp("png");
-	// decode using libheif tool
-	let output = Command::new("/usr/bin/heif-convert")
+	#[cfg(feature = "magick")]
+	{
+		let out_path = util::mktemp("png");
+		// decode using libheif tool
+		let output = Command::new("/usr/bin/heif-convert")
 					 .arg(input_path.as_path())
 					 .arg(out_path.as_path())
 					 .output()
 					 .expect("failed to execute process");
-	if output.status.success() == false {
-		println!("heic decode failed: {output:?}");
-	}
-	// Ensure EXIF orientation is applied (ImageMagick)
-	let _ = Command::new("/usr/bin/convert")
+		if output.status.success() == false {
+			println!("heic decode failed: {output:?}");
+		}
+		// Ensure EXIF orientation is applied (ImageMagick)
+		let _ = Command::new("/usr/bin/convert")
 					 .arg(out_path.as_path())
 					 .arg("-auto-orient")
 					 .arg(out_path.as_path())
 					 .output();
-	out_path
+		return out_path;
+	}
+	#[cfg(feature = "vips")]
+	{
+		util::file_to_png(input_path)
+	}
 }

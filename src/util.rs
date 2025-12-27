@@ -31,3 +31,37 @@ pub fn named_tempfile(ext: &str) -> NamedTempFile {
         .tempfile_in("/tmp")
         .expect("Failed to create NamedTempFile")
 }
+
+#[cfg(feature = "vips")]
+pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
+    let out_path = mktemp("png");
+    let t0 = std::time::Instant::now();
+    let output = Command::new("/usr/bin/vips")
+        .arg("copy")
+        .arg(input_path.as_path())
+        .arg(&out_path)
+        .output()
+        .expect("failed to execute process");
+    if output.status.success() == false {
+        panic!("vips::file_to_png() failed: {output:?}");
+    }
+    if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+        eprintln!("vips file_to_png: {} ms", t0.elapsed().as_millis());
+    }
+    PathBuf::from(out_path)
+}
+
+#[cfg(feature = "magick")]
+pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
+    let out_path = mktemp("png");
+    let output = Command::new("/usr/bin/convert")
+        .arg(input_path.as_path())
+        .arg("-auto-orient")
+        .arg(&out_path)
+        .output()
+        .expect("failed to execute process");
+    if output.status.success() == false {
+        panic!("magick::file_to_png() failed: {output:?}");
+    }
+    PathBuf::from(out_path)
+}

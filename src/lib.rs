@@ -9,6 +9,11 @@ pub mod heic;
 pub mod png;
 pub mod diff;
 
+#[cfg(all(feature = "vips", feature = "magick"))]
+compile_error!("Choose exactly one backend: enable either feature `vips` or `magick`.");
+#[cfg(not(any(feature = "vips", feature = "magick")))]
+compile_error!("No backend selected. Enable feature `vips` (default) or `magick`.");
+
 //// dSSIM presets expressed in terms of *output quality*
 //// higher quality ⇒ smaller distance (stricter), lower quality ⇒ larger distance
 pub const LOW_QUALITY_THRESHOLD:    f32 = 0.008; // strongest compression
@@ -116,8 +121,12 @@ pub fn encode<'a>(
     output_format: &str,
     opts: EncodeOptions<'a>,
 ) -> NamedTempFile {
+    let t0 = std::time::Instant::now();
+    let t_png = std::time::Instant::now();
     let png = to_png(data, input_format);
-
+    if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+        eprintln!("img-shrink to_png: {} ms", t_png.elapsed().as_millis());
+    }
     // `None`  ⇒ fixed quality (single encode)
     // `Some` ⇒ adaptive sweep until dSSIM ≤ threshold
     let res = encode_from_png_internal(
@@ -130,7 +139,26 @@ pub fn encode<'a>(
         opts.quality_value,
     );
     let _ = std::fs::remove_file(png);
+    if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+        eprintln!("img-shrink encode total: {} ms", t0.elapsed().as_millis());
+    }
     res
+}
+
+pub fn encode_from_png<'a>(
+    png_path: &PathBuf,
+    output_format: &str,
+    opts: EncodeOptions<'a>,
+) -> NamedTempFile {
+    encode_from_png_internal(
+        png_path,
+        output_format,
+        opts.size,
+        opts.crop,
+        opts.threshold,
+        opts.quality_idx,
+        opts.quality_value,
+    )
 }
 
 // Adaptive-quality convenience wrapper.
@@ -160,12 +188,21 @@ fn encode_from_png_internal(
     quality_idx: Option<usize>,
     quality_value: Option<u8>,
 ) -> NamedTempFile {
+    let t_resize = std::time::Instant::now();
     let base_png = png::resize(png_path, size, crop);
+    if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+        eprintln!("img-shrink resize: {} ms", t_resize.elapsed().as_millis());
+    }
 
     // Fixed-quality
     if threshold.is_none() {
         if let Some(quality) = quality_value {
-            return _encode_from_png_quality(&base_png, output_format, quality);
+            let t_enc = std::time::Instant::now();
+            let out = _encode_from_png_quality(&base_png, output_format, quality);
+            if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+                eprintln!("img-shrink encode fixed quality: {} ms", t_enc.elapsed().as_millis());
+            }
+            return out;
         }
         if let Some(idx) = quality_idx {
             if idx > MAX_QUALITY_IDX {
@@ -173,7 +210,12 @@ fn encode_from_png_internal(
             }
         }
         let idx = quality_idx.unwrap_or(MAX_QUALITY_IDX);
-        return _encode_from_png(&base_png, output_format, idx);
+        let t_enc = std::time::Instant::now();
+        let out = _encode_from_png(&base_png, output_format, idx);
+        if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
+            eprintln!("img-shrink encode fixed idx: {} ms", t_enc.elapsed().as_millis());
+        }
+        return out;
     }
 
     // Adaptive sweep
@@ -192,8 +234,6 @@ fn encode_from_png_internal(
         };
 
         let dist = diff::distance(&base_png, &cand_png);
-        println!("dist: {dist}");
-
         if dist <= thr {
             return cand;
         }

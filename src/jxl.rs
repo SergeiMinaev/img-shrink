@@ -45,14 +45,21 @@ pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
 }
 
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
-    let out_path = util::mktemp("png");
-    let output = Command::new("/usr/bin/djxl")
-                     .arg(input_path)
-                     .arg(out_path.as_path())
-                     .output()
-                     .expect("failed to execute process");
-    if output.status.success() == false {
-        println!("jxl decode failed: {output:?}");
-    }
-	out_path
+	#[cfg(feature = "magick")]
+	{
+		let out_path = util::mktemp("png");
+		let output = Command::new("/usr/bin/djxl")
+					 .arg(input_path)
+					 .arg(out_path.as_path())
+					 .output()
+					 .expect("failed to execute process");
+		if output.status.success() == false {
+			println!("jxl decode failed: {output:?}");
+		}
+		return out_path;
+	}
+	#[cfg(feature = "vips")]
+	{
+		util::file_to_png(input_path)
+	}
 }

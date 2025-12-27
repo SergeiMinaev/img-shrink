@@ -48,15 +48,22 @@ pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
 }
 
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
-	let out_path = util::mktemp("png");
-	let output = Command::new("/usr/bin/dwebp")
+	#[cfg(feature = "magick")]
+	{
+		let out_path = util::mktemp("png");
+		let output = Command::new("/usr/bin/dwebp")
 					 .arg(input_path)
 					 .arg("-o")
 					 .arg(out_path.as_path())
 					 .output()
 					 .expect("failed to execute process");
-	if output.status.success() == false {
-		println!("webp decode failed: {output:?}");
+		if output.status.success() == false {
+			println!("webp decode failed: {output:?}");
+		}
+		return out_path;
 	}
-	out_path
+	#[cfg(feature = "vips")]
+	{
+		util::file_to_png(input_path)
+	}
 }
