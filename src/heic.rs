@@ -41,7 +41,9 @@ pub fn encode_quality(png_path: &PathBuf, quality: u8) -> NamedTempFile {
 
 pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
 	let input_path = util::bytes_to_tempfile(data, "heic");
-	file_to_png(&input_path)
+	let out = file_to_png(&input_path);
+	util::cleanup_tempfile(&input_path);
+	out
 }
 
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {

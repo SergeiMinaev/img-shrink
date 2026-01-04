@@ -202,6 +202,7 @@ fn encode_from_png_internal(
             if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
                 eprintln!("img-shrink encode fixed quality: {} ms", t_enc.elapsed().as_millis());
             }
+            util::cleanup_tempfile(&base_png);
             return out;
         }
         if let Some(idx) = quality_idx {
@@ -215,6 +216,7 @@ fn encode_from_png_internal(
         if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
             eprintln!("img-shrink encode fixed idx: {} ms", t_enc.elapsed().as_millis());
         }
+        util::cleanup_tempfile(&base_png);
         return out;
     }
 
@@ -234,11 +236,14 @@ fn encode_from_png_internal(
         };
 
         let dist = diff::distance(&base_png, &cand_png);
+        util::cleanup_tempfile(&cand_png);
         if dist <= thr {
+            util::cleanup_tempfile(&base_png);
             return cand;
         }
         last_candidate = Some(cand);
     }
+    util::cleanup_tempfile(&base_png);
     last_candidate.unwrap()
 }
 

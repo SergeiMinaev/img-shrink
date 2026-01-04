@@ -33,10 +33,17 @@ struct Args {
 struct WebpDssimArgs {
     input_dir: PathBuf,
     output_dir: PathBuf,
-    quality: u8,
+    quality: Option<u8>,
+    preset: Option<DssimPreset>,
     size: Option<String>,
     crop: bool,
     recursive: bool,
+}
+
+#[derive(Clone, Copy)]
+enum DssimPreset {
+    High,
+    Medium,
 }
 
 pub fn entrypoint() {
@@ -186,8 +193,10 @@ fn run(args: &Args) -> Result<(), String> {
 }
 
 fn run_webp_dssim(args: &WebpDssimArgs) -> Result<(), String> {
-    if args.quality > 100 {
-        return Err("quality must be between 0 and 100".to_string());
+    if let Some(quality) = args.quality {
+        if quality > 100 {
+            return Err("quality must be between 0 and 100".to_string());
+        }
     }
 
     let mut files = Vec::new();
@@ -211,16 +220,29 @@ fn run_webp_dssim(args: &WebpDssimArgs) -> Result<(), String> {
         let base_png = img_shrink::to_png(&data, &input_format);
 
         let out_path = output_path(&args.input_dir, &path, &args.output_dir, "webp")?;
-        let webp_opts = build_webp_opts(args);
-        let webp_tmp = img_shrink::encode(&data, &input_format, "webp", webp_opts);
+        let (webp_tmp, chosen_quality, dist) = if let Some(quality) = args.quality {
+            let webp_opts = build_webp_opts(args);
+            let webp_tmp = img_shrink::encode(&data, &input_format, "webp", webp_opts);
+            let cand_png = img_shrink::webp::file_to_png(&webp_tmp.path().to_path_buf());
+            let dist = img_shrink::diff::distance(&base_png, &cand_png);
+            let _ = fs::remove_file(cand_png);
+            (webp_tmp, quality, dist)
+        } else {
+            let threshold = match args.preset {
+                Some(DssimPreset::High) => img_shrink::HIGH_QUALITY_THRESHOLD,
+                Some(DssimPreset::Medium) => img_shrink::MEDIUM_QUALITY_THRESHOLD,
+                None => return Err("missing required --quality <0-100> or --preset <high|medium>".to_string()),
+            };
+            adaptive_webp_dssim(&base_png, args, threshold)?
+        };
         save_tempfile(&webp_tmp, &out_path)?;
-
-        let cand_png = img_shrink::webp::file_to_png(&out_path);
-        let dist = img_shrink::diff::distance(&base_png, &cand_png);
-        println!("dssim: {dist:.6} {}", out_path.display());
+        println!(
+            "dssim: {dist:.6} {} quality={}",
+            out_path.display(),
+            chosen_quality
+        );
 
         let _ = fs::remove_file(base_png);
-        let _ = fs::remove_file(cand_png);
 
         processed += 1;
     }
@@ -294,8 +316,39 @@ fn build_webp_opts(args: &WebpDssimArgs) -> img_shrink::EncodeOptions<'_> {
     if let Some(size) = args.size.as_deref() {
         builder = builder.size(size);
     }
-    builder = builder.crop(args.crop).quality_value(args.quality);
+    builder = builder.crop(args.crop);
+    if let Some(quality) = args.quality {
+        builder = builder.quality_value(quality);
+    } else if let Some(preset) = args.preset {
+        builder = match preset {
+            DssimPreset::High => builder.high(),
+            DssimPreset::Medium => builder.medium(),
+        };
+    }
     builder.build()
+}
+
+fn adaptive_webp_dssim(
+    base_png: &PathBuf,
+    args: &WebpDssimArgs,
+    threshold: f32,
+) -> Result<(NamedTempFile, u8, f32), String> {
+    let size = args.size.as_deref().unwrap_or(">");
+    let resized = img_shrink::png::resize(base_png, size, args.crop);
+    let mut last: Option<(NamedTempFile, u8, f32)> = None;
+    for (idx, quality) in img_shrink::webp::QUALITY_LIST.iter().enumerate() {
+        let tmp = img_shrink::webp::encode(&resized, idx);
+        let cand_png = img_shrink::webp::file_to_png(&tmp.path().to_path_buf());
+        let dist = img_shrink::diff::distance(&resized, &cand_png);
+        let _ = fs::remove_file(cand_png);
+        if dist <= threshold {
+            let _ = fs::remove_file(resized);
+            return Ok((tmp, *quality, dist));
+        }
+        last = Some((tmp, *quality, dist));
+    }
+    let _ = fs::remove_file(resized);
+    last.ok_or_else(|| "no candidates for dssim preset".to_string())
 }
 
 fn save_tempfile(tmp: &NamedTempFile, dest: &Path) -> Result<u64, String> {
@@ -449,9 +502,10 @@ fn print_usage_webp_dssim() {
     let bin = env::args().next().unwrap_or_else(|| "img-shrink".to_string());
     println!("Usage:");
     println!("  {bin} webp-dssim --input <DIR> --output <DIR> --quality <0-100>");
+    println!("  {bin} webp-dssim --input <DIR> --output <DIR> --preset <high|medium>");
     println!("      [--size <size>] [--crop] [--recursive]");
     println!();
-    println!("Encodes all images to webp with the requested quality and prints dssim per file.");
+    println!("Encodes all images to webp with the requested quality or preset and prints dssim per file.");
 }
 
 impl Args {
@@ -529,6 +583,7 @@ impl WebpDssimArgs {
         let mut input_dir = None;
         let mut output_dir = None;
         let mut quality = None;
+        let mut preset: Option<DssimPreset> = None;
         let mut size = None;
         let mut crop = false;
         let mut recursive = false;
@@ -544,6 +599,10 @@ impl WebpDssimArgs {
                 "--quality" => {
                     let value = next_value(args, "--quality")?;
                     quality = Some(parse_quality_value(&value)?);
+                }
+                "--preset" => {
+                    let value = next_value(args, "--preset")?;
+                    preset = Some(parse_dssim_preset(&value)?);
                 }
                 "--size" => {
                     size = Some(next_value(args, "--size")?);
@@ -568,16 +627,30 @@ impl WebpDssimArgs {
             input_dir.ok_or_else(|| "missing required --input <DIR>".to_string())?;
         let output_dir =
             output_dir.ok_or_else(|| "missing required --output <DIR>".to_string())?;
-        let quality = quality.ok_or_else(|| "missing required --quality <0-100>".to_string())?;
+        if quality.is_none() && preset.is_none() {
+            return Err("missing required --quality <0-100> or --preset <high|medium>".to_string());
+        }
+        if quality.is_some() && preset.is_some() {
+            return Err("use only one of --quality or --preset".to_string());
+        }
 
         Ok(Self {
             input_dir: PathBuf::from(input_dir),
             output_dir: PathBuf::from(output_dir),
             quality,
+            preset,
             size,
             crop,
             recursive,
         })
+    }
+}
+
+fn parse_dssim_preset(value: &str) -> Result<DssimPreset, String> {
+    match value {
+        "high" => Ok(DssimPreset::High),
+        "medium" => Ok(DssimPreset::Medium),
+        _ => Err(format!("unknown preset: {value}")),
     }
 }
 

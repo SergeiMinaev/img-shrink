@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Write;
 use std::process::{ Command };
 use std::str;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 
@@ -15,6 +15,18 @@ pub fn mktemp(ext: &str) -> PathBuf {
         panic!("`mktemp` failed: {:?}", out);
     }
     return PathBuf::from(str::from_utf8(&out.stdout).unwrap().trim().to_string())
+}
+
+fn is_img_shrink_temp(path: &Path) -> bool {
+    let parent = path.parent().and_then(|p| p.to_str());
+    let file = path.file_name().and_then(|n| n.to_str());
+    parent == Some("/tmp") && file.map_or(false, |name| name.starts_with("img-shrink_"))
+}
+
+pub fn cleanup_tempfile(path: &Path) {
+    if is_img_shrink_temp(path) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 pub fn bytes_to_tempfile(data: &Vec<u8>, input_format: &str) -> PathBuf {
@@ -30,6 +42,36 @@ pub fn named_tempfile(ext: &str) -> NamedTempFile {
         .suffix(&format!(".{ext}"))
         .tempfile_in("/tmp")
         .expect("Failed to create NamedTempFile")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_removes_img_shrink_tempfiles() {
+        let tmp = named_tempfile("png");
+        let (file, path) = tmp.keep().expect("keep tempfile");
+        drop(file);
+        assert!(path.exists());
+        cleanup_tempfile(&path);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn cleanup_ignores_other_paths() {
+        let tmp = tempfile::Builder::new()
+            .prefix("not-img-shrink_")
+            .suffix(".png")
+            .tempfile_in("/tmp")
+            .expect("create tempfile");
+        let (file, path) = tmp.keep().expect("keep tempfile");
+        drop(file);
+        assert!(path.exists());
+        cleanup_tempfile(&path);
+        assert!(path.exists());
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(feature = "vips")]
