@@ -42,13 +42,18 @@ pub fn encode_quality(png_path: &PathBuf, quality: u8) -> NamedTempFile {
       tmp
 }
 
+/// Decode WebP bytes to a temp PNG file and return its path.
+///
+/// The caller is responsible for deleting the temp file when done.
 pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
-	let input_path = util::bytes_to_tempfile(data, "webp");
-	let out = file_to_png(&input_path);
-	util::cleanup_tempfile(&input_path);
-	out
+	let tmp = util::bytes_to_named_tempfile(data, "webp");
+    let input_path = tmp.path().to_path_buf();
+	file_to_png(&input_path)
 }
 
+/// Decode a WebP file to a temp PNG file and return its path.
+///
+/// The caller is responsible for deleting the temp file when done.
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
 	#[cfg(feature = "magick")]
 	{

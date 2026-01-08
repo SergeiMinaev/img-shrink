@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::io::Write;
 use std::process::{ Command };
 use std::str;
@@ -6,6 +5,9 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 
+/// Create a temp file path in `/tmp` using the img-shrink prefix.
+///
+/// The file exists on disk and must be removed by the caller when done.
 pub fn mktemp(ext: &str) -> PathBuf {
     let path = format!("/tmp/img-shrink_XXXXXXXXXXXX.{ext}");
     let out = Command::new("/usr/bin/mktemp")
@@ -29,11 +31,23 @@ pub fn cleanup_tempfile(path: &Path) {
     }
 }
 
+/// Write bytes to a `NamedTempFile` and return it.
+///
+/// The temp file is removed on drop unless the caller persists it via `keep()`.
+pub fn bytes_to_named_tempfile(data: &Vec<u8>, input_format: &str) -> NamedTempFile {
+    let mut tmp = named_tempfile(input_format);
+    tmp.write_all(data).expect("Failed to write tempfile");
+    tmp
+}
+
+/// Write bytes to a temp file and return its path.
+///
+/// The caller is responsible for deleting the temp file when done.
 pub fn bytes_to_tempfile(data: &Vec<u8>, input_format: &str) -> PathBuf {
-	let path = mktemp(input_format);
-	let mut f = File::create(path.clone()).unwrap();
-	let _ = f.write_all(&data).unwrap();
-	path
+	let tmp = bytes_to_named_tempfile(data, input_format);
+    let (file, path) = tmp.keep().expect("Failed to keep tempfile");
+    drop(file);
+    path
 }
 
 pub fn named_tempfile(ext: &str) -> NamedTempFile {
@@ -75,6 +89,9 @@ mod tests {
 }
 
 #[cfg(feature = "vips")]
+/// Decode an image file to a temp PNG file and return its path.
+///
+/// The caller is responsible for deleting the temp file when done.
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
     let out_path = mktemp("png");
     let t0 = std::time::Instant::now();
@@ -119,6 +136,9 @@ pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
 }
 
 #[cfg(feature = "magick")]
+/// Decode an image file to a temp PNG file and return its path.
+///
+/// The caller is responsible for deleting the temp file when done.
 pub fn file_to_png(input_path: &PathBuf) -> PathBuf {
     let out_path = mktemp("png");
     let output = Command::new("/usr/bin/convert")

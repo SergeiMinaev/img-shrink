@@ -111,10 +111,13 @@ impl<'a> EncodeOptionsBuilder<'a> {
 }
 
 /// Main entry-point.
-/// 
+///
 /// Pass an `EncodeOptions` value to control resize, cropping, adaptive quality
-/// selection and the optional dSSIM threshold.  For a quick one-liner that keeps
+/// selection and the optional dSSIM threshold. For a quick one-liner that keeps
 /// the defaults, use `encode_default`.
+///
+/// The returned `NamedTempFile` is removed when dropped. Use `keep()` if you
+/// want the output to persist on disk.
 pub fn encode<'a>(
     data: &Vec<u8>,
     input_format: &str,
@@ -145,6 +148,10 @@ pub fn encode<'a>(
     res
 }
 
+/// Encode an existing PNG file to the desired output format.
+///
+/// The returned `NamedTempFile` is removed when dropped. Use `keep()` if you
+/// want the output to persist on disk.
 pub fn encode_from_png<'a>(
     png_path: &PathBuf,
     output_format: &str,
@@ -162,10 +169,10 @@ pub fn encode_from_png<'a>(
 }
 
 // Adaptive-quality convenience wrapper.
-// 
+//
 // Builds default `EncodeOptions`, switches on adaptive mode and keeps the
-// library-wide `DEFAULT_DSSIM_THRESHOLD`.  No resize and no crop are applied.
-// 
+// library-wide `DEFAULT_DSSIM_THRESHOLD`. No resize and no crop are applied.
+//
 // Typical usage:
 // ```rust
 // let file = img_shrink::encode_adaptive(&bytes, "jpg", "jxl");
@@ -248,6 +255,9 @@ fn encode_from_png_internal(
 }
 
 
+/// Convert input bytes to a PNG file in `/tmp`.
+///
+/// The returned path points to a temp file; callers must remove it when done.
 pub fn to_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
 	match input_format.to_lowercase().as_str() {
 		"jxl" =>  {

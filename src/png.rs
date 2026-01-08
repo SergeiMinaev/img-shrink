@@ -2,6 +2,10 @@ use std::path::PathBuf;
 use crate::util;
 
 
+/// Resize a PNG, returning a temp file path when a new image is produced.
+///
+/// If no resize is needed, this returns the input path unchanged. If a temp
+/// file is returned, the caller should remove it when done.
 pub fn resize(path: &PathBuf, size: &str, crop: bool) -> PathBuf {
     #[cfg(feature = "vips")]
     {
@@ -104,6 +108,9 @@ fn vips_image_size(path: &PathBuf) -> Option<(i32, i32)> {
     Some((w?, h?))
 }
 
+/// Write PNG bytes to a temp file and return its path.
+///
+/// The caller is responsible for deleting the temp file when done.
 pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
 	util::bytes_to_tempfile(data, "png")
 }
