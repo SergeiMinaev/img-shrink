@@ -337,7 +337,7 @@ fn adaptive_webp_dssim(
     let resized = img_shrink::png::resize(base_png, size, args.crop);
     let mut last: Option<(NamedTempFile, u8, f32)> = None;
     for (idx, quality) in img_shrink::webp::QUALITY_LIST.iter().enumerate() {
-        let tmp = img_shrink::webp::encode(&resized, idx);
+        let tmp = img_shrink::webp::encode(&resized, idx, true);
         let cand_png = img_shrink::webp::file_to_png(&tmp.path().to_path_buf());
         let dist = img_shrink::diff::distance(&resized, &cand_png);
         let _ = fs::remove_file(cand_png);

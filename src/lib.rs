@@ -31,6 +31,7 @@ pub struct EncodeOptions<'a> {
     pub threshold: Option<f32>,
     pub quality_idx: Option<usize>,
     pub quality_value: Option<u8>,
+    pub sharp_yuv: bool,
 }
 
 impl<'a> Default for EncodeOptions<'a> {
@@ -41,6 +42,7 @@ impl<'a> Default for EncodeOptions<'a> {
             threshold: Some(DEFAULT_DSSIM_THRESHOLD),
             quality_idx: None,
             quality_value: None,
+            sharp_yuv: true,
         }
     }
 }
@@ -105,6 +107,11 @@ impl<'a> EncodeOptionsBuilder<'a> {
         self
     }
 
+    pub fn sharp_yuv(mut self, sharp_yuv: bool) -> Self {
+        self.opts.sharp_yuv = sharp_yuv;
+        self
+    }
+
     pub fn build(self) -> EncodeOptions<'a> {
         self.opts
     }
@@ -140,6 +147,7 @@ pub fn encode<'a>(
         opts.threshold,
         opts.quality_idx,
         opts.quality_value,
+        opts.sharp_yuv,
     );
     let _ = std::fs::remove_file(png);
     if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
@@ -165,6 +173,7 @@ pub fn encode_from_png<'a>(
         opts.threshold,
         opts.quality_idx,
         opts.quality_value,
+        opts.sharp_yuv,
     )
 }
 
@@ -194,6 +203,7 @@ fn encode_from_png_internal(
     threshold: Option<f32>,
     quality_idx: Option<usize>,
     quality_value: Option<u8>,
+    sharp_yuv: bool,
 ) -> NamedTempFile {
     let t_resize = std::time::Instant::now();
     let base_png = png::resize(png_path, size, crop);
@@ -206,7 +216,7 @@ fn encode_from_png_internal(
     if threshold.is_none() {
         if let Some(quality) = quality_value {
             let t_enc = std::time::Instant::now();
-            let out = _encode_from_png_quality(&base_png, output_format, quality);
+            let out = _encode_from_png_quality(&base_png, output_format, quality, sharp_yuv);
             if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
                 eprintln!("img-shrink encode fixed quality: {} ms", t_enc.elapsed().as_millis());
             }
@@ -222,7 +232,7 @@ fn encode_from_png_internal(
         }
         let idx = quality_idx.unwrap_or(MAX_QUALITY_IDX);
         let t_enc = std::time::Instant::now();
-        let out = _encode_from_png(&base_png, output_format, idx);
+        let out = _encode_from_png(&base_png, output_format, idx, sharp_yuv);
         if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
             eprintln!("img-shrink encode fixed idx: {} ms", t_enc.elapsed().as_millis());
         }
@@ -237,7 +247,7 @@ fn encode_from_png_internal(
     let thr = threshold.unwrap();
 
     for quality_idx in 0..=MAX_QUALITY_IDX {
-        let cand = _encode_from_png(&base_png, output_format, quality_idx);
+        let cand = _encode_from_png(&base_png, output_format, quality_idx, sharp_yuv);
 
         // decode candidate back to PNG for dSSIM
         let cand_png = match output_format.to_lowercase().as_str() {
@@ -292,7 +302,12 @@ pub fn to_png(data: &Vec<u8>, input_format: &str) -> PathBuf {
 }
 
 
-fn _encode_from_png(png_path: &PathBuf, output_format: &str, quality: usize) -> NamedTempFile {
+fn _encode_from_png(
+    png_path: &PathBuf,
+    output_format: &str,
+    quality: usize,
+    sharp_yuv: bool,
+) -> NamedTempFile {
 	match output_format.to_lowercase().as_str() {
 		"jxl" =>  {
 			jxl::encode(png_path, quality)
@@ -304,7 +319,7 @@ fn _encode_from_png(png_path: &PathBuf, output_format: &str, quality: usize) -> 
 			jpg::encode(png_path, quality)
 		},
 		"webp" =>  {
-			webp::encode(png_path, quality)
+			webp::encode(png_path, quality, sharp_yuv)
 		},
 		"heic" | "heif" => {
 			heic::encode(png_path, quality)
@@ -317,6 +332,7 @@ fn _encode_from_png_quality(
     png_path: &PathBuf,
     output_format: &str,
     quality: u8,
+    sharp_yuv: bool,
 ) -> NamedTempFile {
 	match output_format.to_lowercase().as_str() {
 		"jxl" =>  {
@@ -329,7 +345,7 @@ fn _encode_from_png_quality(
 			jpg::encode_quality(png_path, quality)
 		},
 		"webp" =>  {
-			webp::encode_quality(png_path, quality)
+			webp::encode_quality(png_path, quality, sharp_yuv)
 		},
 		"heic" | "heif" => {
 			heic::encode_quality(png_path, quality)

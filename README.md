@@ -2,6 +2,13 @@
 
 Rust library for image recompression with external encoders.
 
+## WebP `sharp_yuv`
+
+WebP encoding enables `-sharp_yuv` by default.
+
+- API control: `EncodeOptionsBuilder::sharp_yuv(bool)`.
+- Default: `true`.
+
 ## Temporary files
 
 This crate uses temp files under `/tmp` (prefix `img-shrink_`).
