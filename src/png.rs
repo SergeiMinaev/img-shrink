@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use crate::util;
+use crate::{Corner, Watermark};
 
 
 /// Resize a PNG, returning a temp file path when a new image is produced.
@@ -113,4 +114,110 @@ fn vips_image_size(path: &PathBuf) -> Option<(i32, i32)> {
 /// The caller is responsible for deleting the temp file when done.
 pub fn bytes_to_png(data: &Vec<u8>) -> PathBuf {
 	util::bytes_to_tempfile(data, "png")
+}
+
+/// Composite a watermark (PNG with alpha) onto a PNG file.
+///
+/// The watermark is scaled to `wm.width_frac` of the base image width and
+/// placed in `wm.corner` with a `wm.margin_frac` margin. Returns the path to
+/// a new temp file; the input is left untouched and the caller is responsible
+/// for deleting the returned temp file.
+pub fn watermark(path: &PathBuf, wm: &Watermark) -> PathBuf {
+    #[cfg(feature = "vips")]
+    {
+        use std::process::Command;
+        let (w, h) = vips_image_size(path)
+            .unwrap_or_else(|| panic!("png::watermark: vipsheader failed on {}", path.display()));
+        let target_w = ((w as f64 * wm.width_frac).round() as i32).max(1);
+        let margin = (w as f64 * wm.margin_frac).round() as i32;
+
+        let wm_resized = util::mktemp("png");
+        let output = Command::new("/usr/bin/vipsthumbnail")
+            .arg(wm.path)
+            .arg("--size")
+            .arg(format!("{target_w}x100000"))
+            .arg("-o")
+            .arg(&wm_resized)
+            .output()
+            .expect("failed to execute process");
+        if output.status.success() == false {
+            panic!("png::watermark(vipsthumbnail) failed: {output:?}");
+        }
+        let (wm_w, wm_h) = vips_image_size(&wm_resized)
+            .unwrap_or_else(|| panic!("png::watermark: vipsheader failed on {}", wm_resized.display()));
+        let x = match wm.corner {
+            Corner::SouthEast | Corner::NorthEast => (w - wm_w - margin).max(0),
+            Corner::SouthWest | Corner::NorthWest => margin.min((w - wm_w).max(0)),
+        };
+        let y = match wm.corner {
+            Corner::SouthEast | Corner::SouthWest => (h - wm_h - margin).max(0),
+            Corner::NorthEast | Corner::NorthWest => margin.min((h - wm_h).max(0)),
+        };
+
+        let out_path = util::mktemp("png");
+        let output = Command::new("/usr/bin/vips")
+            .arg("composite2")
+            .arg(path.as_path())
+            .arg(&wm_resized)
+            .arg(&out_path)
+            .arg("over")
+            .arg("--x")
+            .arg(x.to_string())
+            .arg("--y")
+            .arg(y.to_string())
+            .output()
+            .expect("failed to execute process");
+        util::cleanup_tempfile(&wm_resized);
+        if output.status.success() == false {
+            panic!("png::watermark(composite2) failed: {output:?}");
+        }
+        return out_path;
+    }
+
+    #[cfg(feature = "magick")]
+    {
+        use std::process::Command;
+        let output = Command::new("/usr/bin/identify")
+            .arg("-format")
+            .arg("%w")
+            .arg(&path.display().to_string())
+            .output()
+            .expect("failed to execute process");
+        if output.status.success() == false {
+            panic!("png::watermark(identify) failed: {output:?}");
+        }
+        let w: i32 = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .expect("png::watermark: bad identify output");
+        let target_w = ((w as f64 * wm.width_frac).round() as i32).max(1);
+        let margin = (w as f64 * wm.margin_frac).round() as i32;
+        let gravity = match wm.corner {
+            Corner::SouthEast => "SouthEast",
+            Corner::SouthWest => "SouthWest",
+            Corner::NorthEast => "NorthEast",
+            Corner::NorthWest => "NorthWest",
+        };
+
+        let out_path = util::mktemp("png");
+        let output = Command::new("/usr/bin/convert")
+            .arg(&path.display().to_string())
+            .arg("(")
+            .arg(&wm.path.display().to_string())
+            .arg("-resize")
+            .arg(format!("{target_w}x"))
+            .arg(")")
+            .arg("-gravity")
+            .arg(gravity)
+            .arg("-geometry")
+            .arg(format!("+{margin}+{margin}"))
+            .arg("-composite")
+            .arg(&out_path)
+            .output()
+            .expect("failed to execute process");
+        if output.status.success() == false {
+            panic!("png::watermark(magick) failed: {output:?}");
+        }
+        return out_path;
+    }
 }

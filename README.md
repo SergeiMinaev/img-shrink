@@ -9,6 +9,23 @@ WebP encoding enables `-sharp_yuv` by default.
 - API control: `EncodeOptionsBuilder::sharp_yuv(bool)`.
 - Default: `true`.
 
+## Watermark
+
+An optional watermark (PNG with alpha) can be composited onto the output.
+It is applied after resize, so its size stays proportional to the final image.
+
+```rust
+let wm = img_shrink::Watermark::new(Path::new("logo.png"))
+    .width_frac(0.25)                      // default 0.30 of base image width
+    .margin_frac(0.03)                     // default 0.02 of base image width
+    .corner(img_shrink::Corner::NorthWest); // default SouthEast
+let opts = img_shrink::EncodeOptionsBuilder::new()
+    .size("800x800")
+    .watermark(wm)
+    .build();
+let out = img_shrink::encode(&bytes, "jpg", "webp", opts);
+```
+
 ## Temporary files
 
 This crate uses temp files under `/tmp` (prefix `img-shrink_`).

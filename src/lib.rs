@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 pub mod util;
@@ -24,6 +24,66 @@ pub const DEFAULT_DSSIM_THRESHOLD: f32 = MEDIUM_QUALITY_THRESHOLD;
 pub const MAX_QUALITY_IDX: usize = 6;
 
 
+/// Default watermark width as a fraction of the base image width.
+pub const DEFAULT_WATERMARK_WIDTH_FRAC: f64 = 0.30;
+/// Default watermark margin from the edges as a fraction of the base image width.
+pub const DEFAULT_WATERMARK_MARGIN_FRAC: f64 = 0.02;
+
+/// Corner of the base image where the watermark is placed.
+#[derive(Clone, Copy, Default)]
+pub enum Corner {
+    #[default]
+    SouthEast,
+    SouthWest,
+    NorthEast,
+    NorthWest,
+}
+
+/// Watermark overlay: a PNG with alpha, scaled relative to the base image
+/// and composited into the chosen corner after resize.
+///
+/// ```rust,ignore
+/// let wm = img_shrink::Watermark::new(Path::new("logo.png"))
+///     .width_frac(0.25)
+///     .corner(img_shrink::Corner::NorthWest);
+/// let opts = img_shrink::EncodeOptionsBuilder::new().size("800x800").watermark(wm).build();
+/// ```
+#[derive(Clone, Copy)]
+pub struct Watermark<'a> {
+    pub path: &'a Path,
+    /// Watermark width as a fraction of the base image width.
+    pub width_frac: f64,
+    /// Margin from the edges as a fraction of the base image width.
+    pub margin_frac: f64,
+    pub corner: Corner,
+}
+
+impl<'a> Watermark<'a> {
+    pub fn new(path: &'a Path) -> Self {
+        Self {
+            path,
+            width_frac: DEFAULT_WATERMARK_WIDTH_FRAC,
+            margin_frac: DEFAULT_WATERMARK_MARGIN_FRAC,
+            corner: Corner::default(),
+        }
+    }
+
+    pub fn width_frac(mut self, width_frac: f64) -> Self {
+        self.width_frac = width_frac;
+        self
+    }
+
+    pub fn margin_frac(mut self, margin_frac: f64) -> Self {
+        self.margin_frac = margin_frac;
+        self
+    }
+
+    pub fn corner(mut self, corner: Corner) -> Self {
+        self.corner = corner;
+        self
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct EncodeOptions<'a> {
     pub size:     &'a str,
@@ -32,6 +92,7 @@ pub struct EncodeOptions<'a> {
     pub quality_idx: Option<usize>,
     pub quality_value: Option<u8>,
     pub sharp_yuv: bool,
+    pub watermark: Option<Watermark<'a>>,
 }
 
 impl<'a> Default for EncodeOptions<'a> {
@@ -43,6 +104,7 @@ impl<'a> Default for EncodeOptions<'a> {
             quality_idx: None,
             quality_value: None,
             sharp_yuv: true,
+            watermark: None,
         }
     }
 }
@@ -112,6 +174,11 @@ impl<'a> EncodeOptionsBuilder<'a> {
         self
     }
 
+    pub fn watermark(mut self, watermark: Watermark<'a>) -> Self {
+        self.opts.watermark = Some(watermark);
+        self
+    }
+
     pub fn build(self) -> EncodeOptions<'a> {
         self.opts
     }
@@ -148,6 +215,7 @@ pub fn encode<'a>(
         opts.quality_idx,
         opts.quality_value,
         opts.sharp_yuv,
+        opts.watermark,
     );
     let _ = std::fs::remove_file(png);
     if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
@@ -174,6 +242,7 @@ pub fn encode_from_png<'a>(
         opts.quality_idx,
         opts.quality_value,
         opts.sharp_yuv,
+        opts.watermark,
     )
 }
 
@@ -204,13 +273,28 @@ fn encode_from_png_internal(
     quality_idx: Option<usize>,
     quality_value: Option<u8>,
     sharp_yuv: bool,
+    watermark: Option<Watermark>,
 ) -> NamedTempFile {
     let t_resize = std::time::Instant::now();
     let base_png = png::resize(png_path, size, crop);
-    let base_is_input = base_png == *png_path;
+    let mut base_is_input = base_png == *png_path;
     if std::env::var("IMG_SHRINK_TIMINGS").ok().as_deref() == Some("1") {
         eprintln!("img-shrink resize: {} ms", t_resize.elapsed().as_millis());
     }
+
+    // The watermark is composited onto the already-resized image so its
+    // size stays proportional to the final output.
+    let base_png = match watermark {
+        Some(wm) => {
+            let stamped = png::watermark(&base_png, &wm);
+            if !base_is_input {
+                util::cleanup_tempfile(&base_png);
+            }
+            base_is_input = false;
+            stamped
+        }
+        None => base_png,
+    };
 
     // Fixed-quality
     if threshold.is_none() {
